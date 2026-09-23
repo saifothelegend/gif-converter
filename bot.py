@@ -71,20 +71,10 @@ async def on_ready():
 
     try:
 
-        guild = discord.Object(
-            id=1551941310682767410
-        )
-
-        bot.tree.copy_global_to(
-            guild=guild
-        )
-
-        synced = await bot.tree.sync(
-            guild=guild
-        )
+        synced = await bot.tree.sync()
 
         print(
-            f"Synced {len(synced)} slash command(s) to your server"
+            f"Synced {len(synced)} global slash command(s)"
         )
 
     except Exception as e:
@@ -92,7 +82,6 @@ async def on_ready():
         print(
             f"Failed to sync commands: {e}"
         )
-
 
 # =========================
 # DOWNLOAD FILE
@@ -347,7 +336,12 @@ async def smart_convert(
 
 @bot.tree.command(
     name="gif",
-    description="Convert a video or image into a high-quality GIF."
+    description="Convert a video or image into a high-quality GIF.",
+    allowed_contexts=app_commands.AppCommandContext(
+        guild=True,
+        dm_channel=True,
+        private_channel=True
+    )
 )
 @app_commands.describe(
     file="The video or image you want to convert."
