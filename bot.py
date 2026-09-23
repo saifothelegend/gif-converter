@@ -1,5 +1,6 @@
 import os
 import asyncio
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -18,6 +19,10 @@ from dotenv import load_dotenv
 MAX_GIF_SIZE = 9 * 1024 * 1024
 DOWNLOAD_TIMEOUT = 300
 FFMPEG_TIMEOUT = 300
+
+# Only allow one FFmpeg conversion at a time.
+# This prevents multiple large conversions from exhausting the 512 MB container.
+CONVERSION_SEMAPHORE = asyncio.Semaphore(1)
 
 VIDEO_EXTENSIONS = {
     ".mp4",
@@ -148,6 +153,12 @@ async def convert_image_to_gif(
     command = [
         "ffmpeg",
         "-y",
+        "-threads",
+        "1",
+        "-filter_threads",
+        "1",
+        "-filter_complex_threads",
+        "1",
         "-loop",
         "1",
         "-i",
@@ -207,6 +218,12 @@ async def convert_video_to_gif(
     command = [
         "ffmpeg",
         "-y",
+        "-threads",
+        "1",
+        "-filter_threads",
+        "1",
+        "-filter_complex_threads",
+        "1",
         "-i",
         input_file,
         "-vf",
@@ -335,7 +352,11 @@ async def process_attachment(attachment, status_callback=None):
             "Use an image or video."
         )
 
-    with tempfile.TemporaryDirectory() as temp_dir:
+    # Keep all temporary data on disk instead of loading the finished GIF
+    # into Python memory. This is important on small RAM instances.
+    temp_dir = tempfile.mkdtemp(prefix="gif_converter_")
+
+    try:
         input_file = os.path.join(temp_dir, filename)
         output_file = os.path.join(temp_dir, "converted.gif")
 
@@ -365,9 +386,11 @@ async def process_attachment(attachment, status_callback=None):
 
         print("Conversion finished.", flush=True)
 
-        # Read the finished GIF before the temporary directory disappears.
-        with open(output_file, "rb") as gif_file:
-            return gif_file.read()
+        return output_file, temp_dir
+
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 
 # =========================
@@ -410,24 +433,31 @@ async def gif(
             print(f"STATUS UPDATE ERROR: {e}", flush=True)
 
     try:
-        await update_status("📥 Starting GIF conversion...")
+        if CONVERSION_SEMAPHORE.locked():
+            await update_status("⏳ Another conversion is running. Waiting for its turn...")
 
-        gif_data = await process_attachment(
-            file,
-            update_status
-        )
+        async with CONVERSION_SEMAPHORE:
+            await update_status("📥 Starting GIF conversion...")
 
-        await update_status("📤 Uploading your finished GIF...")
+            output_file, temp_dir = await process_attachment(
+                file,
+                update_status
+            )
 
-        await interaction.edit_original_response(
-            content="✅ Done! High-quality GIF:",
-            attachments=[
-                discord.File(
-                    __import__("io").BytesIO(gif_data),
-                    filename="converted.gif"
+            try:
+                await update_status("📤 Uploading your finished GIF...")
+
+                await interaction.edit_original_response(
+                    content="✅ Done! High-quality GIF:",
+                    attachments=[
+                        discord.File(
+                            output_file,
+                            filename="converted.gif"
+                        )
+                    ]
                 )
-            ]
-        )
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
     except Exception as e:
         print(f"GIF ERROR: {e}", flush=True)
@@ -495,24 +525,31 @@ async def convert_message_to_gif(
             print(f"STATUS UPDATE ERROR: {e}", flush=True)
 
     try:
-        await update_status("📥 Starting GIF conversion...")
+        if CONVERSION_SEMAPHORE.locked():
+            await update_status("⏳ Another conversion is running. Waiting for its turn...")
 
-        gif_data = await process_attachment(
-            attachment,
-            update_status
-        )
+        async with CONVERSION_SEMAPHORE:
+            await update_status("📥 Starting GIF conversion...")
 
-        await update_status("📤 Uploading your finished GIF...")
+            output_file, temp_dir = await process_attachment(
+                attachment,
+                update_status
+            )
 
-        await interaction.edit_original_response(
-            content="✅ Done! High-quality GIF:",
-            attachments=[
-                discord.File(
-                    __import__("io").BytesIO(gif_data),
-                    filename="converted.gif"
+            try:
+                await update_status("📤 Uploading your finished GIF...")
+
+                await interaction.edit_original_response(
+                    content="✅ Done! High-quality GIF:",
+                    attachments=[
+                        discord.File(
+                            output_file,
+                            filename="converted.gif"
+                        )
+                    ]
                 )
-            ]
-        )
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
     except Exception as e:
         print(
