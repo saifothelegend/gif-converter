@@ -124,6 +124,87 @@ async def download_file(url, destination):
 
 
 # =========================
+# TIKTOK DOWNLOAD
+# =========================
+
+async def download_tiktok(
+    url,
+    output_template
+):
+
+    command = [
+        "python",
+        "-m",
+        "yt_dlp",
+
+        "--no-playlist",
+
+        "--format",
+        "bestvideo[ext=mp4]/best[ext=mp4]/best",
+
+        "--merge-output-format",
+        "mp4",
+
+        "--output",
+        output_template,
+
+        url,
+    ]
+
+    print(
+        "Downloading TikTok video..."
+    )
+
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    stdout, stderr = await process.communicate()
+
+    if process.returncode != 0:
+
+        error_message = stderr.decode(
+            errors="ignore"
+        )
+
+        raise RuntimeError(
+            "TikTok download failed:\n"
+            f"{error_message[-2000:]}"
+        )
+
+    output_file = output_template.replace(
+        "%(ext)s",
+        "mp4"
+    )
+
+    if os.path.exists(output_file):
+
+        return output_file
+
+    # yt-dlp can sometimes choose another extension.
+    directory = os.path.dirname(
+        output_template
+    )
+
+    files = list(
+        Path(directory).glob(
+            "tiktok_video.*"
+        )
+    )
+
+    if not files:
+
+        raise RuntimeError(
+            "TikTok video was downloaded, "
+            "but the output file could not be found."
+        )
+
+    return str(files[0])
+
+
+# =========================
 # IMAGE TO GIF
 # =========================
 
@@ -149,7 +230,13 @@ async def convert_image_to_gif(
         "-vf",
         (
             f"scale='min({width},iw)':-2:"
-            "flags=lanczos"
+            "flags=lanczos,"
+            "split[s0][s1];"
+            "[s0]palettegen="
+            "max_colors=256:"
+            "stats_mode=diff[p];"
+            "[s1][p]paletteuse="
+            "dither=sierra2_4a"
         ),
 
         "-r",
@@ -165,7 +252,7 @@ async def convert_image_to_gif(
     ]
 
     print(
-        "Running image conversion..."
+        f"Converting image at width={width}"
     )
 
     process = await asyncio.create_subprocess_exec(
@@ -234,7 +321,7 @@ async def convert_video_to_gif(
     ]
 
     print(
-        "Running high-quality video conversion..."
+        f"Converting video at width={width}, fps={fps}"
     )
 
     process = await asyncio.create_subprocess_exec(
@@ -264,7 +351,7 @@ async def convert_video_to_gif(
 
 
 # =========================
-# SMART CONVERSION
+# AUTOMATIC COMPRESSION
 # =========================
 
 async def smart_convert(
@@ -273,14 +360,40 @@ async def smart_convert(
     is_image
 ):
 
-    settings = [
-        (720, 15),
-        (600, 15),
-        (480, 12),
-        (400, 10),
-        (320, 8),
-        (240, 6),
-    ]
+    if is_image:
+
+        settings = [
+            (1200, 15),
+            (1000, 15),
+            (900, 15),
+            (800, 15),
+            (720, 15),
+            (600, 15),
+            (480, 12),
+            (400, 10),
+            (320, 8),
+            (240, 6),
+        ]
+
+    else:
+
+        settings = [
+            (1080, 30),
+            (1080, 24),
+            (1080, 20),
+            (1080, 15),
+            (900, 24),
+            (900, 20),
+            (900, 15),
+            (720, 24),
+            (720, 20),
+            (720, 15),
+            (600, 15),
+            (480, 12),
+            (400, 10),
+            (320, 8),
+            (240, 6),
+        ]
 
     for width, fps in settings:
 
@@ -289,7 +402,7 @@ async def smart_convert(
             os.remove(output_file)
 
         print(
-            f"Converting with width={width}, fps={fps}"
+            f"Trying width={width}, fps={fps}"
         )
 
         if is_image:
@@ -313,21 +426,26 @@ async def smart_convert(
             output_file
         )
 
+        size_mb = size / (
+            1024 * 1024
+        )
+
         print(
-            f"GIF size: "
-            f"{size / (1024 * 1024):.2f} MB"
+            f"GIF size: {size_mb:.2f} MB"
         )
 
         if size <= MAX_GIF_SIZE:
 
             print(
-                "Quality setting accepted."
+                "Automatic compression "
+                "found an acceptable quality."
             )
 
             return
 
     raise RuntimeError(
-        "The GIF is still too large after automatic compression."
+        "The GIF is still too large after "
+        "automatic compression."
     )
 
 
@@ -398,12 +516,12 @@ async def gif(
                 input_file
             )
 
-            print(
-                "Starting conversion..."
-            )
-
             is_image = (
                 extension in IMAGE_EXTENSIONS
+            )
+
+            print(
+                "Starting automatic conversion..."
             )
 
             await smart_convert(
@@ -438,6 +556,106 @@ async def gif(
 
         await interaction.followup.send(
             f"❌ Conversion failed:\n"
+            f"`{str(e)[:1500]}`"
+        )
+
+
+# =========================
+# /TIKTOK COMMAND
+# =========================
+
+@bot.tree.command(
+    name="tiktok",
+    description="Convert a TikTok video link into a high-quality GIF."
+)
+@app_commands.allowed_contexts(
+    guilds=True,
+    dms=True,
+    private_channels=True
+)
+@app_commands.allowed_installs(
+    guilds=True,
+    users=True
+)
+@app_commands.describe(
+    url="The TikTok video URL."
+)
+async def tiktok(
+    interaction: discord.Interaction,
+    url: str
+):
+
+    await interaction.response.defer()
+
+    if (
+        "tiktok.com" not in url.lower()
+        and "vm.tiktok.com" not in url.lower()
+        and "vt.tiktok.com" not in url.lower()
+    ):
+
+        await interaction.followup.send(
+            "❌ Please provide a valid TikTok video link."
+        )
+
+        return
+
+    try:
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+
+            output_template = os.path.join(
+                temp_dir,
+                "tiktok_video.%(ext)s"
+            )
+
+            print(
+                f"Downloading TikTok URL: {url}"
+            )
+
+            input_file = await download_tiktok(
+                url,
+                output_template
+            )
+
+            output_file = os.path.join(
+                temp_dir,
+                "converted.gif"
+            )
+
+            print(
+                "TikTok download finished."
+            )
+
+            print(
+                "Starting automatic GIF conversion..."
+            )
+
+            await smart_convert(
+                input_file,
+                output_file,
+                False
+            )
+
+            print(
+                "TikTok GIF conversion finished."
+            )
+
+            await interaction.followup.send(
+                "✅ Done! TikTok → GIF:",
+                file=discord.File(
+                    output_file,
+                    filename="tiktok.gif"
+                )
+            )
+
+    except Exception as e:
+
+        print(
+            f"TIKTOK ERROR: {e}"
+        )
+
+        await interaction.followup.send(
+            "❌ I couldn't convert that TikTok.\n"
             f"`{str(e)[:1500]}`"
         )
 
