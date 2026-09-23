@@ -234,7 +234,8 @@ async def convert_video_to_gif(
 async def smart_convert(
     input_file,
     output_file,
-    is_image
+    is_image,
+    status_callback=None
 ):
     if is_image:
         settings = [
@@ -277,6 +278,12 @@ async def smart_convert(
             flush=True
         )
 
+        if status_callback:
+            fps_text = f" at {fps} FPS" if not is_image else ""
+            await status_callback(
+                f"⚙️ Converting to GIF — {width}px{fps_text}..."
+            )
+
         if is_image:
             await convert_image_to_gif(
                 input_file,
@@ -315,7 +322,7 @@ async def smart_convert(
 # PROCESS ATTACHMENT
 # =========================
 
-async def process_attachment(attachment):
+async def process_attachment(attachment, status_callback=None):
     filename = attachment.filename
     extension = Path(filename).suffix.lower()
 
@@ -334,6 +341,9 @@ async def process_attachment(attachment):
 
         print(f"Downloading: {filename}", flush=True)
 
+        if status_callback:
+            await status_callback("📥 Downloading your file...")
+
         await download_file(
             attachment.url,
             input_file
@@ -343,10 +353,14 @@ async def process_attachment(attachment):
 
         print("Starting automatic conversion...", flush=True)
 
+        if status_callback:
+            await status_callback("⚙️ Converting to GIF...")
+
         await smart_convert(
             input_file,
             output_file,
-            is_image
+            is_image,
+            status_callback
         )
 
         print("Conversion finished.", flush=True)
@@ -387,15 +401,32 @@ async def gif(
     print("=== GIF DEFER FINISHED ===", flush=True)
     print(f"=== GIF FILE: {file.filename} ===", flush=True)
 
-    try:
-        gif_data = await process_attachment(file)
-
-        await interaction.followup.send(
-            "✅ Done! High-quality GIF:",
-            file=discord.File(
-                __import__("io").BytesIO(gif_data),
-                filename="converted.gif"
+    async def update_status(message):
+        try:
+            await interaction.edit_original_response(
+                content=message
             )
+        except Exception as e:
+            print(f"STATUS UPDATE ERROR: {e}", flush=True)
+
+    try:
+        await update_status("📥 Starting GIF conversion...")
+
+        gif_data = await process_attachment(
+            file,
+            update_status
+        )
+
+        await update_status("📤 Uploading your finished GIF...")
+
+        await interaction.edit_original_response(
+            content="✅ Done! High-quality GIF:",
+            attachments=[
+                discord.File(
+                    __import__("io").BytesIO(gif_data),
+                    filename="converted.gif"
+                )
+            ]
         )
 
     except Exception as e:
@@ -455,15 +486,32 @@ async def convert_message_to_gif(
         )
         return
 
-    try:
-        gif_data = await process_attachment(attachment)
-
-        await interaction.followup.send(
-            "✅ Done! High-quality GIF:",
-            file=discord.File(
-                __import__("io").BytesIO(gif_data),
-                filename="converted.gif"
+    async def update_status(message_text):
+        try:
+            await interaction.edit_original_response(
+                content=message_text
             )
+        except Exception as e:
+            print(f"STATUS UPDATE ERROR: {e}", flush=True)
+
+    try:
+        await update_status("📥 Starting GIF conversion...")
+
+        gif_data = await process_attachment(
+            attachment,
+            update_status
+        )
+
+        await update_status("📤 Uploading your finished GIF...")
+
+        await interaction.edit_original_response(
+            content="✅ Done! High-quality GIF:",
+            attachments=[
+                discord.File(
+                    __import__("io").BytesIO(gif_data),
+                    filename="converted.gif"
+                )
+            ]
         )
 
     except Exception as e:
