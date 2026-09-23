@@ -337,7 +337,12 @@ async def smart_convert(
 
 @bot.tree.command(
     name="gif",
-    description="Convert a video or image into a high-quality GIF."
+    description="Convert a video or image into a high-quality GIF.",
+    allowed_contexts=app_commands.AppCommandContext(
+        guild=True,
+        dm_channel=True,
+        private_channel=True
+    )
 )
 @app_commands.describe(
     file="The video or image you want to convert."
