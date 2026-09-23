@@ -339,6 +339,15 @@ async def smart_convert(
     name="gif",
     description="Convert a video or image into a high-quality GIF."
 )
+@app_commands.allowed_contexts(
+    guilds=True,
+    dms=True,
+    private_channels=True
+)
+@app_commands.allowed_installs(
+    guilds=True,
+    users=True
+)
 @app_commands.describe(
     file="The video or image you want to convert."
 )
