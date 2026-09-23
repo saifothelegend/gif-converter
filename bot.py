@@ -474,9 +474,18 @@ async def gif(
     file: discord.Attachment
 ):
 
+    print("=== GIF COMMAND STARTED ===", flush=True)
+
     await interaction.response.defer()
 
+    print("=== GIF DEFER FINISHED ===", flush=True)
+
     filename = file.filename
+
+    print(
+        f"=== GIF FILE: {filename} ===",
+        flush=True
+    )
 
     extension = Path(
         filename
