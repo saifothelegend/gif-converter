@@ -83,6 +83,7 @@ async def on_ready():
             f"Failed to sync commands: {e}"
         )
 
+
 # =========================
 # DOWNLOAD FILE
 # =========================
@@ -336,12 +337,7 @@ async def smart_convert(
 
 @bot.tree.command(
     name="gif",
-    description="Convert a video or image into a high-quality GIF.",
-    allowed_contexts=app_commands.AppCommandContext(
-        guild=True,
-        dm_channel=True,
-        private_channel=True
-    )
+    description="Convert a video or image into a high-quality GIF."
 )
 @app_commands.describe(
     file="The video or image you want to convert."
