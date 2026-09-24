@@ -54,8 +54,8 @@ async def download(url, path):
 async def ffmpeg(src, dst, width, fps, seconds, image=False):
     size = f"{width}x{width}"
     prep = (
-        f"scale={size}:force_original_aspect_ratio=decrease,"
-        f"pad={size}:(ow-iw)/2:(oh-ih)/2:color=black"
+        f"scale=w={width}:h={width}:force_original_aspect_ratio=decrease,"
+        f"pad=w={width}:h={width}:x=(ow-iw)/2:y=(oh-ih)/2:color=black"
     )
     if not image:
         prep = f"fps={fps}," + prep
