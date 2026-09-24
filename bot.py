@@ -1,614 +1,160 @@
-import os
-import asyncio
-import shutil
-import tempfile
+import os, asyncio, tempfile, shutil
 from pathlib import Path
+from io import BytesIO
 
-import aiohttp
-import discord
+import aiohttp, discord
 from aiohttp import web
 from discord import app_commands
 from discord.ext import commands
-from dotenv import load_dotenv
+
+MAX = 9 * 1024 * 1024
+TIMEOUT = 180
+VIDEO = {".mp4",".mov",".webm",".mkv",".avi",".m4v"}
+IMAGE = {".jpg",".jpeg",".png",".webp",".bmp",".gif"}
+LOCK = asyncio.Semaphore(1)
 
 
-# =========================
-# SETTINGS
-# =========================
+bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
-MAX_GIF_SIZE = 9 * 1024 * 1024
-DOWNLOAD_TIMEOUT = 300
-FFMPEG_TIMEOUT = 300
-
-# Only allow one FFmpeg conversion at a time.
-# This prevents multiple large conversions from exhausting the 512 MB container.
-CONVERSION_SEMAPHORE = asyncio.Semaphore(1)
-
-VIDEO_EXTENSIONS = {
-    ".mp4",
-    ".mov",
-    ".webm",
-    ".mkv",
-    ".avi",
-    ".m4v",
-}
-
-IMAGE_EXTENSIONS = {
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-    ".bmp",
-    ".gif",
-}
-
-
-# =========================
-# LOAD TOKEN
-# =========================
-
-load_dotenv()
-
-TOKEN = os.getenv("DISCORD_TOKEN")
-
-if not TOKEN:
-    raise RuntimeError("DISCORD_TOKEN was not found")
-
-
-# =========================
-# BOT
-# =========================
-
-intents = discord.Intents.default()
-
-bot = commands.Bot(
-    command_prefix="!",
-    intents=intents
-)
-
-
-# =========================
-# WHEN BOT STARTS
-# =========================
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}", flush=True)
-
     try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)", flush=True)
+        x = await bot.tree.sync()
+        print(f"Synced {len(x)} command(s)", flush=True)
     except Exception as e:
-        print(f"Failed to sync commands: {e}", flush=True)
+        print(f"Sync error: {e}", flush=True)
 
 
-# =========================
-# DOWNLOAD FILE
-# =========================
-
-async def download_file(url, destination):
-    timeout = aiohttp.ClientTimeout(
-        total=DOWNLOAD_TIMEOUT
-    )
-
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(url) as response:
-            if response.status != 200:
-                raise RuntimeError(
-                    f"Could not download the file. HTTP {response.status}"
-                )
-
-            with open(destination, "wb") as file:
-                while True:
-                    chunk = await response.content.read(1024 * 1024)
-
-                    if not chunk:
-                        break
-
-                    file.write(chunk)
-
-
-# =========================
-# RUN FFMPEG WITH TIMEOUT
-# =========================
-
-async def run_ffmpeg(command):
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
+async def status(i, text):
     try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=FFMPEG_TIMEOUT
-        )
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.communicate()
-        raise RuntimeError(
-            "FFmpeg took too long to finish. "
-            "Try a shorter or smaller video."
-        )
-
-    if process.returncode != 0:
-        error_message = stderr.decode(errors="ignore")
-
-        raise RuntimeError(
-            f"FFmpeg conversion failed:\n"
-            f"{error_message[-2000:]}"
-        )
-
-
-# =========================
-# IMAGE TO GIF
-# =========================
-
-async def convert_image_to_gif(
-    input_file,
-    output_file,
-    width
-):
-    command = [
-        "ffmpeg",
-        "-y",
-        "-threads",
-        "1",
-        "-filter_threads",
-        "1",
-        "-filter_complex_threads",
-        "1",
-        "-loop",
-        "1",
-        "-i",
-        input_file,
-        "-t",
-        "1",
-        "-vf",
-        (
-            f"scale='min({width},iw)':-2:"
-            "flags=lanczos,"
-            "split[s0][s1];"
-            "[s0]palettegen="
-            "max_colors=256:"
-            "stats_mode=diff[p];"
-            "[s1][p]paletteuse="
-            "dither=sierra2_4a"
-        ),
-        "-r",
-        "15",
-        "-gifflags",
-        "-offsetting",
-        "-loop",
-        "0",
-        output_file,
-    ]
-
-    print(f"Converting image at width={width}", flush=True)
-
-    await run_ffmpeg(command)
-
-    if not os.path.exists(output_file):
-        raise RuntimeError("FFmpeg did not create the GIF.")
-
-
-# =========================
-# VIDEO TO GIF
-# =========================
-
-async def convert_video_to_gif(
-    input_file,
-    output_file,
-    width,
-    fps
-):
-    scale_filter = (
-        f"fps={fps},"
-        f"scale='min({width},iw)':-2:"
-        "flags=lanczos,"
-        "split[s0][s1];"
-        "[s0]palettegen="
-        "max_colors=256:"
-        "stats_mode=diff[p];"
-        "[s1][p]paletteuse="
-        "dither=sierra2_4a"
-    )
-
-    command = [
-        "ffmpeg",
-        "-y",
-        "-threads",
-        "1",
-        "-filter_threads",
-        "1",
-        "-filter_complex_threads",
-        "1",
-        "-i",
-        input_file,
-        "-vf",
-        scale_filter,
-        "-loop",
-        "0",
-        output_file,
-    ]
-
-    print(
-        f"Converting video at width={width}, fps={fps}",
-        flush=True
-    )
-
-    await run_ffmpeg(command)
-
-    if not os.path.exists(output_file):
-        raise RuntimeError("FFmpeg did not create the GIF.")
-
-
-# =========================
-# AUTOMATIC COMPRESSION
-# =========================
-
-async def smart_convert(
-    input_file,
-    output_file,
-    is_image,
-    status_callback=None
-):
-    if is_image:
-        settings = [
-            (1200, 15),
-            (1000, 15),
-            (900, 15),
-            (800, 15),
-            (720, 15),
-            (600, 15),
-            (480, 12),
-            (400, 10),
-            (320, 8),
-            (240, 6),
-        ]
-    else:
-        settings = [
-            (1080, 30),
-            (1080, 24),
-            (1080, 20),
-            (1080, 15),
-            (900, 24),
-            (900, 20),
-            (900, 15),
-            (720, 24),
-            (720, 20),
-            (720, 15),
-            (600, 15),
-            (480, 12),
-            (400, 10),
-            (320, 8),
-            (240, 6),
-        ]
-
-    for width, fps in settings:
-        if os.path.exists(output_file):
-            os.remove(output_file)
-
-        print(
-            f"Trying width={width}, fps={fps}",
-            flush=True
-        )
-
-        if status_callback:
-            fps_text = f" at {fps} FPS" if not is_image else ""
-            await status_callback(
-                f"⚙️ Converting to GIF — {width}px{fps_text}..."
-            )
-
-        if is_image:
-            await convert_image_to_gif(
-                input_file,
-                output_file,
-                width
-            )
-        else:
-            await convert_video_to_gif(
-                input_file,
-                output_file,
-                width,
-                fps
-            )
-
-        size = os.path.getsize(output_file)
-        size_mb = size / (1024 * 1024)
-
-        print(
-            f"GIF size: {size_mb:.2f} MB",
-            flush=True
-        )
-
-        if size <= MAX_GIF_SIZE:
-            print(
-                "Automatic compression found an acceptable quality.",
-                flush=True
-            )
-            return
-
-    raise RuntimeError(
-        "The GIF is still too large after automatic compression."
-    )
-
-
-# =========================
-# PROCESS ATTACHMENT
-# =========================
-
-async def process_attachment(attachment, status_callback=None):
-    filename = attachment.filename
-    extension = Path(filename).suffix.lower()
-
-    if (
-        extension not in VIDEO_EXTENSIONS
-        and extension not in IMAGE_EXTENSIONS
-    ):
-        raise RuntimeError(
-            "That file type isn't supported. "
-            "Use an image or video."
-        )
-
-    # Keep all temporary data on disk instead of loading the finished GIF
-    # into Python memory. This is important on small RAM instances.
-    temp_dir = tempfile.mkdtemp(prefix="gif_converter_")
-
-    try:
-        input_file = os.path.join(temp_dir, filename)
-        output_file = os.path.join(temp_dir, "converted.gif")
-
-        print(f"Downloading: {filename}", flush=True)
-
-        if status_callback:
-            await status_callback("📥 Downloading your file...")
-
-        await download_file(
-            attachment.url,
-            input_file
-        )
-
-        is_image = extension in IMAGE_EXTENSIONS
-
-        print("Starting automatic conversion...", flush=True)
-
-        if status_callback:
-            await status_callback("⚙️ Converting to GIF...")
-
-        await smart_convert(
-            input_file,
-            output_file,
-            is_image,
-            status_callback
-        )
-
-        print("Conversion finished.", flush=True)
-
-        return output_file, temp_dir
-
+        await i.edit_original_response(content=text)
     except Exception:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        pass
+
+
+async def download(url, path):
+    t = aiohttp.ClientTimeout(total=TIMEOUT)
+    async with aiohttp.ClientSession(timeout=t) as s, s.get(url) as r:
+        if r.status != 200:
+            raise RuntimeError(f"Download failed (HTTP {r.status})")
+        with open(path, "wb") as f:
+            async for chunk in r.content.iter_chunked(1024 * 1024):
+                f.write(chunk)
+
+
+async def ffmpeg(src, dst, width, fps, seconds):
+    vf = f"fps={fps},scale=min({width},iw):-2:flags=lanczos"
+    cmd = [
+        "ffmpeg","-y",
+        "-threads","1","-filter_threads","1","-filter_complex_threads","1",
+        "-t",str(seconds),"-i",src,
+        "-vf",vf,"-loop","0",dst
+    ]
+    p = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+    )
+    try:
+        _, err = await asyncio.wait_for(p.communicate(), TIMEOUT)
+    except asyncio.TimeoutError:
+        p.kill()
+        await p.communicate()
+        raise RuntimeError("Conversion timed out. Try a shorter video.")
+    if p.returncode:
+        raise RuntimeError(err.decode(errors="ignore")[-1200:])
+    if not os.path.exists(dst):
+        raise RuntimeError("FFmpeg did not create the GIF.")
+
+
+async def convert(a, update):
+    ext = Path(a.filename).suffix.lower()
+    if ext not in VIDEO and ext not in IMAGE:
+        raise RuntimeError("Please use an image or video.")
+
+    d = tempfile.mkdtemp(prefix="gif_")
+    src, dst = os.path.join(d, a.filename), os.path.join(d, "converted.gif")
+    try:
+        await update("📥 Downloading your file...")
+        await download(a.url, src)
+
+        # One conversion at a time keeps the 512 MB instance predictable.
+        settings = [(IMAGE and 720 or 640, 10, 1)] if ext in IMAGE else [(640,12,8),(480,10,8),(360,8,8)]
+        for n, (w, fps, sec) in enumerate(settings):
+            if n:
+                await update(f"⚙️ Compressing GIF — {w}px at {fps} FPS...")
+            else:
+                await update(f"⚙️ Converting to GIF — {w}px at {fps} FPS...")
+            if os.path.exists(dst):
+                os.remove(dst)
+            await ffmpeg(src, dst, w, fps, sec)
+            if os.path.getsize(dst) <= MAX:
+                return dst, d
+        raise RuntimeError("GIF is still over Discord's 9 MB limit.")
+    except Exception:
+        shutil.rmtree(d, ignore_errors=True)
         raise
 
 
-# =========================
-# /GIF COMMAND
-# =========================
-
-@bot.tree.command(
-    name="gif",
-    description="Convert a video or image into a high-quality GIF."
-)
-@app_commands.allowed_contexts(
-    guilds=True,
-    dms=True,
-    private_channels=True
-)
-@app_commands.allowed_installs(
-    guilds=True,
-    users=True
-)
-@app_commands.describe(
-    file="The video or image you want to convert."
-)
-async def gif(
-    interaction: discord.Interaction,
-    file: discord.Attachment
-):
-    print("=== GIF COMMAND STARTED ===", flush=True)
-
-    await interaction.response.defer()
-
-    print("=== GIF DEFER FINISHED ===", flush=True)
-    print(f"=== GIF FILE: {file.filename} ===", flush=True)
-
-    async def update_status(message):
+async def do_convert(i, a):
+    await i.response.defer()
+    if LOCK.locked():
+        await status(i, "⏳ Another GIF is being converted. Waiting...")
+    async with LOCK:
+        await status(i, "📥 Starting GIF conversion...")
         try:
-            await interaction.edit_original_response(
-                content=message
-            )
-        except Exception as e:
-            print(f"STATUS UPDATE ERROR: {e}", flush=True)
-
-    try:
-        if CONVERSION_SEMAPHORE.locked():
-            await update_status("⏳ Another conversion is running. Waiting for its turn...")
-
-        async with CONVERSION_SEMAPHORE:
-            await update_status("📥 Starting GIF conversion...")
-
-            output_file, temp_dir = await process_attachment(
-                file,
-                update_status
-            )
-
+            path, d = await convert(a, lambda x: status(i, x))
             try:
-                await update_status("📤 Uploading your finished GIF...")
-
-                await interaction.edit_original_response(
-                    content="✅ Done! High-quality GIF:",
-                    attachments=[
-                        discord.File(
-                            output_file,
-                            filename="converted.gif"
-                        )
-                    ]
+                await status(i, "📤 Uploading your GIF...")
+                await i.followup.send(
+                    "✅ Done!",
+                    file=discord.File(path, filename="converted.gif")
                 )
+                await status(i, "✅ Done!")
             finally:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-
-    except Exception as e:
-        print(f"GIF ERROR: {e}", flush=True)
-
-        await interaction.followup.send(
-            "❌ Conversion failed:\n"
-            f"`{str(e)[:1500]}`"
-        )
+                shutil.rmtree(d, ignore_errors=True)
+        except Exception as e:
+            await status(i, f"❌ {str(e)[:1500]}")
 
 
-# =========================
-# RIGHT-CLICK MESSAGE → APPS → CONVERT TO GIF
-# =========================
+@bot.tree.command(name="gif", description="Convert an image or video to a GIF.")
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.describe(file="Image or video to convert.")
+async def gif(i: discord.Interaction, file: discord.Attachment):
+    await do_convert(i, file)
+
 
 @bot.tree.context_menu(name="Convert to GIF")
-@app_commands.allowed_contexts(
-    guilds=True,
-    dms=True,
-    private_channels=True
-)
-@app_commands.allowed_installs(
-    guilds=True,
-    users=True
-)
-async def convert_message_to_gif(
-    interaction: discord.Interaction,
-    message: discord.Message
-):
-    print(
-        "=== MESSAGE GIF COMMAND STARTED ===",
-        flush=True
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.allowed_installs(guilds=True, users=True)
+async def message_gif(i: discord.Interaction, message: discord.Message):
+    a = next(
+        (x for x in message.attachments
+         if Path(x.filename).suffix.lower() in VIDEO | IMAGE),
+        None
     )
-
-    await interaction.response.defer()
-
-    print(
-        "=== MESSAGE GIF DEFER FINISHED ===",
-        flush=True
-    )
-
-    attachment = None
-
-    for item in message.attachments:
-        extension = Path(item.filename).suffix.lower()
-
-        if (
-            extension in VIDEO_EXTENSIONS
-            or extension in IMAGE_EXTENSIONS
-        ):
-            attachment = item
-            break
-
-    if attachment is None:
-        await interaction.followup.send(
-            "❌ That message doesn't contain a supported image or video."
-        )
+    if not a:
+        await i.response.send_message("❌ No supported image/video in that message.")
         return
-
-    async def update_status(message_text):
-        try:
-            await interaction.edit_original_response(
-                content=message_text
-            )
-        except Exception as e:
-            print(f"STATUS UPDATE ERROR: {e}", flush=True)
-
-    try:
-        if CONVERSION_SEMAPHORE.locked():
-            await update_status("⏳ Another conversion is running. Waiting for its turn...")
-
-        async with CONVERSION_SEMAPHORE:
-            await update_status("📥 Starting GIF conversion...")
-
-            output_file, temp_dir = await process_attachment(
-                attachment,
-                update_status
-            )
-
-            try:
-                await update_status("📤 Uploading your finished GIF...")
-
-                await interaction.edit_original_response(
-                    content="✅ Done! High-quality GIF:",
-                    attachments=[
-                        discord.File(
-                            output_file,
-                            filename="converted.gif"
-                        )
-                    ]
-                )
-            finally:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-
-    except Exception as e:
-        print(
-            f"MESSAGE GIF ERROR: {e}",
-            flush=True
-        )
-
-        await interaction.followup.send(
-            "❌ Conversion failed:\n"
-            f"`{str(e)[:1500]}`"
-        )
+    await do_convert(i, a)
 
 
-# =========================
-# RENDER WEB SERVER
-# =========================
+async def health(request):
+    return web.Response(text="GIF Converter is online!")
 
-async def health_check(request):
-    return web.Response(
-        text="GIF Converter is online!"
-    )
-
-
-async def start_web_server():
-    app = web.Application()
-
-    app.router.add_get("/", health_check)
-    app.router.add_get("/health", health_check)
-
-    runner = web.AppRunner(app)
-
-    await runner.setup()
-
-    port = int(
-        os.getenv("PORT", "10000")
-    )
-
-    site = web.TCPSite(
-        runner,
-        "0.0.0.0",
-        port
-    )
-
-    await site.start()
-
-    print(
-        f"Web server running on port {port}",
-        flush=True
-    )
-
-
-# =========================
-# START EVERYTHING
-# =========================
 
 async def main():
-    await start_web_server()
-    await bot.start(TOKEN)
+    app = web.Application()
+    app.router.add_get("/", health)
+    app.router.add_get("/health", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(
+        runner, "0.0.0.0", int(os.getenv("PORT", "10000"))
+    ).start()
+    print("Web server started", flush=True)
+    await bot.start(os.environ["DISCORD_TOKEN"])
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
