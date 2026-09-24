@@ -52,14 +52,25 @@ async def download(url, path):
 
 
 async def ffmpeg(src, dst, width, fps, seconds, image=False):
-    vf = f"fps={fps},scale=w='min({width},iw)':h=-2:flags=lanczos"
+    size = f"{width}x{width}"
+    prep = (
+        f"scale={size}:force_original_aspect_ratio=decrease,"
+        f"pad={size}:(ow-iw)/2:(oh-ih)/2:color=black"
+    )
+    if not image:
+        prep = f"fps={fps}," + prep
+    filt = f"{prep},split[a][b];[a]palettegen=max_colors=256[p];[b][p]paletteuse=dither=sierra2_4a"
     cmd = [
         "ffmpeg","-y","-threads","1","-filter_threads","1",
-        "-filter_complex_threads","1"
+        "-filter_complex_threads","1","-i",src,
+        "-an","-sn","-filter_complex",filt,"-map","[b]",
+        "-loop","0"
     ]
     if image:
-        cmd += ["-loop","1"]
-    cmd += ["-t",str(seconds),"-i",src,"-an","-sn","-dn","-vf",vf,"-loop","0",dst]
+        cmd += ["-frames:v","1"]
+    else:
+        cmd += ["-t",str(seconds)]
+    cmd += [dst]
     p = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
     )
@@ -87,7 +98,7 @@ async def convert(a, update):
         await download(a.url, src)
 
         # One conversion at a time keeps the 512 MB instance predictable.
-        settings = [(720,10,1)] if ext in IMAGE else [(640,12,8),(480,10,8),(360,8,8)]
+        settings = [(1200,1,1),(1024,1,1),(896,1,1),(768,1,1),(640,1,1)] if ext in IMAGE else [(720,12,8),(640,12,8),(480,10,8),(360,8,8)]
         for n, (w, fps, sec) in enumerate(settings):
             if n:
                 await update(f"⚙️ Compressing GIF — {w}px at {fps} FPS...")
