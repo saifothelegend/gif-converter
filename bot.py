@@ -1,6 +1,5 @@
 import os, asyncio, tempfile, shutil
 from pathlib import Path
-from io import BytesIO
 
 import aiohttp, discord
 from aiohttp import web
@@ -44,14 +43,15 @@ async def download(url, path):
                 f.write(chunk)
 
 
-async def ffmpeg(src, dst, width, fps, seconds):
+async def ffmpeg(src, dst, width, fps, seconds, image=False):
     vf = f"fps={fps},scale=w='min({width},iw)':h=-2:flags=lanczos"
     cmd = [
-        "ffmpeg","-y",
-        "-threads","1","-filter_threads","1","-filter_complex_threads","1",
-        "-t",str(seconds),"-i",src,
-        "-vf",vf,"-loop","0",dst
+        "ffmpeg","-y","-threads","1","-filter_threads","1",
+        "-filter_complex_threads","1"
     ]
+    if image:
+        cmd += ["-loop","1"]
+    cmd += ["-t",str(seconds),"-i",src,"-an","-sn","-dn","-vf",vf,"-loop","0",dst]
     p = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
     )
@@ -87,7 +87,7 @@ async def convert(a, update):
                 await update(f"⚙️ Converting to GIF — {w}px at {fps} FPS...")
             if os.path.exists(dst):
                 os.remove(dst)
-            await ffmpeg(src, dst, w, fps, sec)
+            await ffmpeg(src, dst, w, fps, sec, ext in IMAGE)
             if os.path.getsize(dst) <= MAX:
                 return dst, d
         raise RuntimeError("GIF is still over Discord's 9 MB limit.")
