@@ -16,12 +16,20 @@ LOCK = asyncio.Semaphore(1)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
 
+GUILD_ID = 1551941310682767410
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}", flush=True)
     try:
         x = await bot.tree.sync()
-        print(f"Synced {len(x)} command(s)", flush=True)
+        g = discord.Object(id=GUILD_ID)
+        bot.tree.copy_global_to(guild=g)
+        gx = await bot.tree.sync(guild=g)
+        print(
+            f"Synced {len(x)} global and {len(gx)} server command(s)",
+            flush=True
+        )
     except Exception as e:
         print(f"Sync error: {e}", flush=True)
 
