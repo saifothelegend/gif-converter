@@ -52,10 +52,7 @@ async def download(url, path):
 
 
 async def ffmpeg(src, dst, width, fps, seconds, image=False):
-    prep = (
-        f"scale=w={width}:h={width}:force_original_aspect_ratio=decrease,"
-        f"pad=w={width}:h={width}:x=(ow-iw)/2:y=(oh-ih)/2:color=black"
-    )
+    prep = f"scale=w='min({width},iw)':h=-2:flags=lanczos"
     if not image:
         prep = f"fps={fps}," + prep
     filt = f"{prep},split[a][b];[a]palettegen=max_colors=256[p];[b][p]paletteuse=dither=sierra2_4a[out]"
