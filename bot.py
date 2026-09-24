@@ -52,7 +52,6 @@ async def download(url, path):
 
 
 async def ffmpeg(src, dst, width, fps, seconds, image=False):
-    size = f"{width}x{width}"
     prep = (
         f"scale=w={width}:h={width}:force_original_aspect_ratio=decrease,"
         f"pad=w={width}:h={width}:x=(ow-iw)/2:y=(oh-ih)/2:color=black"
@@ -63,7 +62,7 @@ async def ffmpeg(src, dst, width, fps, seconds, image=False):
     cmd = [
         "ffmpeg","-y","-threads","1","-filter_threads","1",
         "-filter_complex_threads","1","-i",src,
-        "-an","-sn","-filter_complex",filt,"-map","[b]",
+        "-an","-sn","-filter_complex",filt,"-map","[out]",
         "-loop","0"
     ]
     if image:
