@@ -79,7 +79,7 @@ async def convert(a, update):
         await download(a.url, src)
 
         # One conversion at a time keeps the 512 MB instance predictable.
-        settings = [(IMAGE and 720 or 640, 10, 1)] if ext in IMAGE else [(640,12,8),(480,10,8),(360,8,8)]
+        settings = [(720,10,1)] if ext in IMAGE else [(640,12,8),(480,10,8),(360,8,8)]
         for n, (w, fps, sec) in enumerate(settings):
             if n:
                 await update(f"⚙️ Compressing GIF — {w}px at {fps} FPS...")
