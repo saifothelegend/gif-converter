@@ -59,7 +59,7 @@ async def ffmpeg(src, dst, width, fps, seconds, image=False):
     )
     if not image:
         prep = f"fps={fps}," + prep
-    filt = f"{prep},split[a][b];[a]palettegen=max_colors=256[p];[b][p]paletteuse=dither=sierra2_4a"
+    filt = f"{prep},split[a][b];[a]palettegen=max_colors=256[p];[b][p]paletteuse=dither=sierra2_4a[out]"
     cmd = [
         "ffmpeg","-y","-threads","1","-filter_threads","1",
         "-filter_complex_threads","1","-i",src,
