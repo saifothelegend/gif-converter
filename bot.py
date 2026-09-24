@@ -45,7 +45,7 @@ async def download(url, path):
 
 
 async def ffmpeg(src, dst, width, fps, seconds):
-    vf = f"fps={fps},scale=min({width},iw):-2:flags=lanczos"
+    vf = f"fps={fps},scale=w='min({width},iw)':h=-2:flags=lanczos"
     cmd = [
         "ffmpeg","-y",
         "-threads","1","-filter_threads","1","-filter_complex_threads","1",
