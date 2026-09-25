@@ -18,6 +18,7 @@ STATS = {"total": 0, "active": 0, "last": "Idle"}
 LOGS = []
 SESSIONS = set()
 MAX_LOGS = 300
+LATEST_GIF = "/tmp/gif_converter_latest.gif"
 
 
 def log_event(kind, message):
@@ -149,6 +150,9 @@ async def do_convert(i, a):
         try:
             path, d = await convert(a, lambda x: status(i, x))
             try:
+                # Keep only the most recent GIF for the admin preview.
+                shutil.copyfile(path, LATEST_GIF)
+                log_event("PREVIEW", f"Updated admin preview with {a.filename}")
                 await status(i, "📤 Uploading your GIF...")
                 await i.followup.send(
                     "✅ Done!",
@@ -283,6 +287,23 @@ async def admin_page(request):
         return web.Response(content_type="text/html", text=LOGIN_HTML)
 
     return web.Response(content_type="text/html", text=ADMIN_HTML)
+
+
+async def api_preview(request):
+    auth = await require_admin(request)
+    if auth:
+        return auth
+
+    if not os.path.exists(LATEST_GIF):
+        return web.Response(status=404, text="No GIF has been converted yet.")
+
+    return web.FileResponse(
+        LATEST_GIF,
+        headers={
+            "Content-Type": "image/gif",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        },
+    )
 
 
 async def api_stats(request):
@@ -448,7 +469,7 @@ textarea{min-height:150px;resize:vertical}select{margin-bottom:12px}
 #sendStatus{min-height:20px;margin-top:10px;color:#9da8c4;font-size:14px}
 .logs{height:430px;overflow:auto;background:#0b1020;border-radius:12px;border:1px solid #222b42}
 .log{padding:12px 14px;border-bottom:1px solid #1c2437}.log:last-child{border:0}.time{color:#6f7c99;font-size:11px}.kind{display:inline-block;margin:4px 7px 0 0;padding:3px 7px;border-radius:6px;background:#202943;color:#aebaff;font-size:10px;font-weight:800}.msg{margin-top:5px;color:#d9deeb;font-size:13px;word-break:break-word}
-.refresh{float:right;border:1px solid #2b334a;background:#171d2d;color:#dce2f0;border-radius:9px;padding:7px 10px;cursor:pointer}
+.preview-panel{margin-top:16px}.preview-wrap{min-height:240px;border:1px solid #222b42;border-radius:12px;background:#0b1020;display:grid;place-items:center;overflow:hidden}.preview-wrap img{display:none;max-width:100%;max-height:520px;object-fit:contain}.preview-meta{margin-top:10px;color:#77839f;font-size:12px}.refresh{float:right;border:1px solid #2b334a;background:#171d2d;color:#dce2f0;border-radius:9px;padding:7px 10px;cursor:pointer}
 @media(max-width:850px){.grid{grid-template-columns:1fr 1fr}.layout{grid-template-columns:1fr}}
 @media(max-width:500px){.grid{grid-template-columns:1fr}.top{padding:15px}.top .brand b{display:none}main{padding:22px 14px}}
 </style>
@@ -463,6 +484,14 @@ textarea{min-height:150px;resize:vertical}select{margin-bottom:12px}
 <div class="card"><div class="label">RAM</div><div id="ram" class="value">—</div></div>
 <div class="card"><div class="label">Active conversions</div><div id="active" class="value">—</div></div>
 <div class="card"><div class="label">Completed</div><div id="total" class="value">—</div></div>
+</section>
+<section class="panel preview-panel">
+<h2>Latest GIF preview</h2>
+<div class="preview-wrap">
+<img id="gifPreview" alt="Latest converted GIF preview">
+<div id="previewEmpty">No GIF has been converted yet.</div>
+</div>
+<div class="preview-meta">This shows the most recently converted GIF and updates automatically.</div>
 </section>
 <section class="layout">
 <div class="panel">
@@ -501,8 +530,17 @@ async function sendMessage(){
  try{const d=await api('/api/admin/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel_id:channel,message:msg})});st.textContent='✓ Sent to '+d.location;document.getElementById('message').value='';await loadLogs();}catch(e){st.textContent='✕ '+e.message;}
 }
 async function logout(){await fetch('/admin/logout',{method:'POST'});location.href='/admin';}
-async function loadAll(){await Promise.all([loadStats(),loadChannels(),loadLogs()]);}
-loadAll();setInterval(()=>{loadStats();loadLogs()},5000);
+async function loadPreview(){
+ const img=document.getElementById('gifPreview'),empty=document.getElementById('previewEmpty');
+ try{
+  const r=await fetch('/api/admin/preview?t='+Date.now());
+  if(!r.ok){img.style.display='none';empty.style.display='block';return;}
+  img.src='/api/admin/preview?t='+Date.now();
+  img.style.display='block';empty.style.display='none';
+ }catch(e){img.style.display='none';empty.style.display='block';}
+}
+async function loadAll(){await Promise.all([loadStats(),loadChannels(),loadLogs(),loadPreview()]);}
+loadAll();setInterval(()=>{loadStats();loadLogs();loadPreview()},5000);
 </script>
 </body>
 </html>
@@ -518,6 +556,7 @@ async def main():
     app.router.add_post("/admin/login", admin_login)
     app.router.add_post("/admin/logout", admin_logout)
     app.router.add_get("/api/admin/stats", api_stats)
+    app.router.add_get("/api/admin/preview", api_preview)
     app.router.add_get("/api/admin/logs", api_logs)
     app.router.add_get("/api/admin/channels", api_channels)
     app.router.add_post("/api/admin/send", api_send)
