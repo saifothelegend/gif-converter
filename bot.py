@@ -11,7 +11,6 @@ TIMEOUT = 180
 VIDEO = {".mp4",".mov",".webm",".mkv",".avi",".m4v"}
 IMAGE = {".jpg",".jpeg",".png",".webp",".bmp",".gif"}
 LOCK = asyncio.Semaphore(1)
-STARTED = asyncio.get_event_loop_policy().new_event_loop if False else None
 STATS = {"total": 0, "active": 0, "last": "Idle"}
 
 
@@ -176,7 +175,8 @@ def ram():
 
 
 def admin_ok(request):
-    return request.headers.get("X-Admin-Key") == os.getenv("ADMIN_KEY")
+    key = request.headers.get("X-Admin-Key") or request.query.get("key")
+    return bool(key) and key == os.getenv("ADMIN_KEY")
 
 
 async def health(request):
@@ -185,7 +185,7 @@ async def health(request):
 
 async def admin(request):
     if not admin_ok(request):
-        return web.Response(status=401, text="Unauthorized. Use the X-Admin-Key header.")
+        return web.Response(status=401, text="Unauthorized. Open /admin?key=YOUR_ADMIN_KEY or use X-Admin-Key.")
 
     return web.Response(content_type="text/html", text=f"""
 <!doctype html>
