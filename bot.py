@@ -208,6 +208,74 @@ async def gif(i: discord.Interaction, file: discord.Attachment):
     await do_convert(i, file)
 
 
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+@bot.tree.command(name="welcome", description="Set the welcome channel and enable the welcomer.")
+@app_commands.describe(channel="The channel where new-member welcome messages should be sent.")
+async def welcome_command(i: discord.Interaction, channel: discord.TextChannel):
+    if i.guild_id != GUILD_ID:
+        await i.response.send_message("❌ This command is only available in the configured server.", ephemeral=True)
+        return
+
+    permissions = channel.permissions_for(i.guild.me) if i.guild and i.guild.me else None
+    if not permissions or not permissions.send_messages or not permissions.embed_links:
+        await i.response.send_message(
+            "❌ I need **Send Messages** and **Embed Links** permission in that channel.",
+            ephemeral=True,
+        )
+        return
+
+    WELCOME["enabled"] = True
+    WELCOME["channel_id"] = str(channel.id)
+    if not WELCOME["message"]:
+        WELCOME["message"] = WELCOME_DEFAULT
+
+    log_event("WELCOME", f"Welcomer enabled by {i.user} in {i.guild.name} / #{channel.name}")
+    await i.response.send_message(
+        f"✅ Welcome messages are now enabled in {channel.mention}.",
+        ephemeral=True,
+    )
+
+
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+@bot.tree.command(name="test", description="Send a test welcome message.")
+@app_commands.describe(channel="The channel where the test welcome should be sent.")
+async def test_command(i: discord.Interaction, channel: discord.TextChannel):
+    if i.guild_id != GUILD_ID:
+        await i.response.send_message("❌ This command is only available in the configured server.", ephemeral=True)
+        return
+
+    permissions = channel.permissions_for(i.guild.me) if i.guild and i.guild.me else None
+    if not permissions or not permissions.send_messages or not permissions.embed_links:
+        await i.response.send_message(
+            "❌ I need **Send Messages** and **Embed Links** permission in that channel.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        template = WELCOME["message"] or WELCOME_DEFAULT
+        text = (template.replace("{user}", str(i.user))
+                .replace("{username}", i.user.display_name)
+                .replace("{mention}", i.user.mention)
+                .replace("{server}", i.guild.name)
+                .replace("{member_count}", str(i.guild.member_count or len(i.guild.members))))
+        embed = discord.Embed(
+            title=f"👋 Welcome to {i.guild.name}!",
+            description=text,
+            color=discord.Color.blurple(),
+        )
+        embed.set_thumbnail(url=i.user.display_avatar.url)
+        embed.set_footer(text="Test welcome message")
+        await channel.send(content=i.user.mention, embed=embed)
+        log_event("WELCOME", f"Sent /test welcome to {i.guild.name} / #{channel.name} by {i.user}")
+        await i.response.send_message(f"✅ Test welcome sent to {channel.mention}.", ephemeral=True)
+    except Exception as e:
+        log_event("ERROR", f"/test welcome failed: {e}")
+        await i.response.send_message(f"❌ Test failed: {str(e)[:500]}", ephemeral=True)
+
+
 @bot.tree.context_menu(name="Convert to GIF")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
