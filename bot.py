@@ -14,6 +14,8 @@ IMAGE = {".jpg",".jpeg",".png",".webp",".bmp",".gif"}
 LOCK = asyncio.Semaphore(1)
 
 GUILD_ID = 1551941310682767410
+WELCOME_DEFAULT = "👋 Welcome {mention} to **{server}**! You are member #{member_count}."
+WELCOME = {"enabled": False, "channel_id": "", "message": WELCOME_DEFAULT}
 STATS = {"total": 0, "active": 0, "last": "Idle"}
 LOGS = []
 SESSIONS = set()
@@ -32,7 +34,9 @@ def log_event(kind, message):
     print(f"[{entry['time']}] [{kind}] {message}", flush=True)
 
 
-bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
+intents = discord.Intents.default()
+intents.members = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 @bot.event
@@ -51,6 +55,30 @@ async def on_ready():
         log_event("SYSTEM", f"Synced {len(x)} global and {len(gx)} server commands")
     except Exception as e:
         log_event("ERROR", f"Command sync failed: {e}")
+
+
+@bot.event
+async def on_member_join(member):
+    if member.guild.id != GUILD_ID:
+        return
+    if not WELCOME["enabled"] or not WELCOME["channel_id"]:
+        return
+    try:
+        channel = await bot.fetch_channel(int(WELCOME["channel_id"]))
+        template = WELCOME["message"] or WELCOME_DEFAULT
+        text = (template.replace("{user}", str(member))
+                .replace("{username}", member.display_name)
+                .replace("{mention}", member.mention)
+                .replace("{server}", member.guild.name)
+                .replace("{member_count}", str(member.guild.member_count or len(member.guild.members))))
+        embed = discord.Embed(title=f"👋 Welcome to {member.guild.name}!",
+                              description=text, color=discord.Color.blurple())
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(text=f"Member #{member.guild.member_count or len(member.guild.members)}")
+        await channel.send(content=member.mention, embed=embed)
+        log_event("WELCOME", f"Welcomed {member} in {member.guild.name} / #{getattr(channel, 'name', channel.id)}")
+    except Exception as e:
+        log_event("ERROR", f"Welcome message failed for {member}: {e}")
 
 
 async def status(i, text):
@@ -352,6 +380,54 @@ async def api_channels(request):
     return json_response({"ok": True, "channels": channels})
 
 
+async def api_welcome(request):
+    auth = await require_admin(request)
+    if auth: return auth
+    guild = bot.get_guild(GUILD_ID)
+    if not guild: return json_response({"ok": False, "error": "Bot is not connected to the server."}, 503)
+    channels = [{"id": str(ch.id), "name": f"#{ch.name}", "category": ch.category.name if ch.category else "No category"}
+                for ch in guild.text_channels if guild.me and ch.permissions_for(guild.me).send_messages]
+    return json_response({"ok": True, "enabled": WELCOME["enabled"], "channel_id": WELCOME["channel_id"],
+                          "message": WELCOME["message"], "channels": channels})
+
+
+async def api_welcome_update(request):
+    auth = await require_admin(request)
+    if auth: return auth
+    try: data = await request.json()
+    except Exception: return json_response({"ok": False, "error": "Invalid request."}, 400)
+    enabled = bool(data.get("enabled", False))
+    channel_id = str(data.get("channel_id", "")).strip()
+    message = str(data.get("message", "")).strip()
+    if enabled and not channel_id: return json_response({"ok": False, "error": "Choose a welcome channel."}, 400)
+    if not message: return json_response({"ok": False, "error": "Enter a welcome message."}, 400)
+    if len(message) > 2000: return json_response({"ok": False, "error": "Welcome messages are limited to 2000 characters."}, 400)
+    WELCOME.update(enabled=enabled, channel_id=channel_id, message=message)
+    log_event("WELCOME", f"Welcomer settings updated: {'enabled' if enabled else 'disabled'}")
+    return json_response({"ok": True, "enabled": enabled})
+
+
+async def api_welcome_test(request):
+    auth = await require_admin(request)
+    if auth: return auth
+    if not WELCOME["channel_id"]: return json_response({"ok": False, "error": "Choose a welcome channel first."}, 400)
+    try:
+        channel = await bot.fetch_channel(int(WELCOME["channel_id"]))
+        guild = bot.get_guild(GUILD_ID)
+        name = guild.name if guild else "your server"
+        text = (WELCOME["message"] or WELCOME_DEFAULT).replace("{user}", str(bot.user)).replace("{username}", str(bot.user)).replace("{mention}", bot.user.mention if bot.user else "@Bot").replace("{server}", name).replace("{member_count}", str(guild.member_count if guild else 0))
+        embed = discord.Embed(title=f"👋 Welcome to {name}!", description=text, color=discord.Color.blurple())
+        if bot.user: embed.set_thumbnail(url=bot.user.display_avatar.url)
+        embed.set_footer(text="Test welcome message")
+        await channel.send(embed=embed)
+        location = f"{name} / #{getattr(channel, 'name', channel.id)}"
+        log_event("WELCOME", f"Sent test welcome to {location}")
+        return json_response({"ok": True, "location": location})
+    except Exception as e:
+        log_event("ERROR", f"Test welcome failed: {e}")
+        return json_response({"ok": False, "error": str(e)[:500]}, 500)
+
+
 async def api_send(request):
     auth = await require_admin(request)
     if auth:
@@ -469,7 +545,7 @@ textarea{min-height:150px;resize:vertical}select{margin-bottom:12px}
 #sendStatus{min-height:20px;margin-top:10px;color:#9da8c4;font-size:14px}
 .logs{height:430px;overflow:auto;background:#0b1020;border-radius:12px;border:1px solid #222b42}
 .log{padding:12px 14px;border-bottom:1px solid #1c2437}.log:last-child{border:0}.time{color:#6f7c99;font-size:11px}.kind{display:inline-block;margin:4px 7px 0 0;padding:3px 7px;border-radius:6px;background:#202943;color:#aebaff;font-size:10px;font-weight:800}.msg{margin-top:5px;color:#d9deeb;font-size:13px;word-break:break-word}
-.preview-panel{margin-top:16px}.preview-wrap{min-height:240px;border:1px solid #222b42;border-radius:12px;background:#0b1020;display:grid;place-items:center;overflow:hidden}.preview-wrap img{display:none;max-width:100%;max-height:520px;object-fit:contain}.preview-meta{margin-top:10px;color:#77839f;font-size:12px}.refresh{float:right;border:1px solid #2b334a;background:#171d2d;color:#dce2f0;border-radius:9px;padding:7px 10px;cursor:pointer}
+.welcome-panel{margin-top:16px}.welcome-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;color:#cbd3e8}.switch input{display:none}.switch span{display:block;width:44px;height:24px;border-radius:20px;background:#2a3249;position:relative;cursor:pointer}.switch span:after{content:"";position:absolute;width:18px;height:18px;top:3px;left:3px;border-radius:50%;background:#fff;transition:.2s}.switch input:checked+span{background:#6d5dfc}.switch input:checked+span:after{transform:translateX(20px)}.variables{margin-top:8px;color:#77839f;font-size:12px}.variables code{background:#202943;padding:3px 6px;border-radius:5px;margin-right:4px}.welcome-actions{display:flex;gap:10px}.test{margin-top:12px;border:1px solid #2b334a;border-radius:11px;padding:12px 18px;background:#171d2d;color:#dce2f0;font-weight:800;cursor:pointer}#welcomeStatus{min-height:20px;margin-top:10px;color:#9da8c4;font-size:14px}.preview-panel{margin-top:16px}.preview-wrap{min-height:240px;border:1px solid #222b42;border-radius:12px;background:#0b1020;display:grid;place-items:center;overflow:hidden}.preview-wrap img{display:none;max-width:100%;max-height:520px;object-fit:contain}.preview-meta{margin-top:10px;color:#77839f;font-size:12px}.refresh{float:right;border:1px solid #2b334a;background:#171d2d;color:#dce2f0;border-radius:9px;padding:7px 10px;cursor:pointer}
 @media(max-width:850px){.grid{grid-template-columns:1fr 1fr}.layout{grid-template-columns:1fr}}
 @media(max-width:500px){.grid{grid-template-columns:1fr}.top{padding:15px}.top .brand b{display:none}main{padding:22px 14px}}
 </style>
@@ -484,6 +560,16 @@ textarea{min-height:150px;resize:vertical}select{margin-bottom:12px}
 <div class="card"><div class="label">RAM</div><div id="ram" class="value">—</div></div>
 <div class="card"><div class="label">Active conversions</div><div id="active" class="value">—</div></div>
 <div class="card"><div class="label">Completed</div><div id="total" class="value">—</div></div>
+</section>
+
+<section class="panel welcome-panel">
+<h2>👋 Welcomer</h2>
+<div class="welcome-row"><label class="switch"><input id="welcomeEnabled" type="checkbox"><span></span></label><span>Enable welcome messages</span></div>
+<select id="welcomeChannel"><option>Loading channels…</option></select>
+<textarea id="welcomeMessage" maxlength="2000" placeholder="Welcome message…"></textarea>
+<div class="variables">Variables: <code>{mention}</code> <code>{username}</code> <code>{user}</code> <code>{server}</code> <code>{member_count}</code></div>
+<div class="welcome-actions"><button class="send" onclick="saveWelcome()">Save welcomer</button><button class="test" onclick="testWelcome()">Send test</button></div>
+<div id="welcomeStatus"></div>
 </section>
 <section class="panel preview-panel">
 <h2>Latest GIF preview</h2>
@@ -530,6 +616,29 @@ async function sendMessage(){
  try{const d=await api('/api/admin/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel_id:channel,message:msg})});st.textContent='✓ Sent to '+d.location;document.getElementById('message').value='';await loadLogs();}catch(e){st.textContent='✕ '+e.message;}
 }
 async function logout(){await fetch('/admin/logout',{method:'POST'});location.href='/admin';}
+
+async function loadWelcome(){
+ try{
+  const d=await api('/api/admin/welcome');
+  document.getElementById('welcomeEnabled').checked=d.enabled;
+  document.getElementById('welcomeMessage').value=d.message;
+  const s=document.getElementById('welcomeChannel');s.innerHTML='';
+  d.channels.forEach(ch=>{const o=document.createElement('option');o.value=ch.id;o.textContent=ch.name+' — '+ch.category;s.appendChild(o)});
+  if(d.channel_id)s.value=d.channel_id;
+  if(!d.channels.length)s.innerHTML='<option value="">No channels available</option>';
+ }catch(e){document.getElementById('welcomeStatus').textContent='✕ '+e.message;}
+}
+async function saveWelcome(){
+ const st=document.getElementById('welcomeStatus');st.textContent='Saving…';
+ try{
+  const d=await api('/api/admin/welcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:document.getElementById('welcomeEnabled').checked,channel_id:document.getElementById('welcomeChannel').value,message:document.getElementById('welcomeMessage').value.trim()})});
+  st.textContent=d.enabled?'✓ Welcomer enabled':'✓ Welcomer disabled';await loadLogs();
+ }catch(e){st.textContent='✕ '+e.message;}
+}
+async function testWelcome(){
+ const st=document.getElementById('welcomeStatus');st.textContent='Sending test…';
+ try{const d=await api('/api/admin/welcome/test',{method:'POST'});st.textContent='✓ Test sent to '+d.location;await loadLogs();}catch(e){st.textContent='✕ '+e.message;}
+}
 async function loadPreview(){
  const img=document.getElementById('gifPreview'),empty=document.getElementById('previewEmpty');
  try{
@@ -539,7 +648,7 @@ async function loadPreview(){
   img.style.display='block';empty.style.display='none';
  }catch(e){img.style.display='none';empty.style.display='block';}
 }
-async function loadAll(){await Promise.all([loadStats(),loadChannels(),loadLogs(),loadPreview()]);}
+async function loadAll(){await Promise.all([loadStats(),loadChannels(),loadLogs(),loadPreview(),loadWelcome()]);}
 loadAll();setInterval(()=>{loadStats();loadLogs();loadPreview()},5000);
 </script>
 </body>
@@ -557,6 +666,9 @@ async def main():
     app.router.add_post("/admin/logout", admin_logout)
     app.router.add_get("/api/admin/stats", api_stats)
     app.router.add_get("/api/admin/preview", api_preview)
+    app.router.add_get("/api/admin/welcome", api_welcome)
+    app.router.add_post("/api/admin/welcome", api_welcome_update)
+    app.router.add_post("/api/admin/welcome/test", api_welcome_test)
     app.router.add_get("/api/admin/logs", api_logs)
     app.router.add_get("/api/admin/channels", api_channels)
     app.router.add_post("/api/admin/send", api_send)
