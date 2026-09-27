@@ -64,7 +64,62 @@ async def on_ready():
 
 
 @bot.event
+AUTO_ROLES = {}
+
+def auto_role_settings(guild_id):
+    return AUTO_ROLES.setdefault(guild_id, {"role_id": ""})
+
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_roles=True)
+@bot.tree.command(name="autorole", description="Set the role automatically given to new members.")
+@app_commands.describe(role="The role new members should automatically receive.")
+async def autorole_command(i: discord.Interaction, role: discord.Role):
+    if not i.guild:
+        await i.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
+        return
+
+    me = i.guild.me
+    if not me or role.is_default() or role >= me.top_role:
+        await i.response.send_message(
+            "❌ I can't assign that role. The role must be below my highest role.",
+            ephemeral=True,
+        )
+        return
+
+    AUTO_ROLES[i.guild.id] = {"role_id": str(role.id)}
+    log_event("AUTOROLE", f"Auto role set to {role.name} in {i.guild.name} by {i.user}")
+    await i.response.send_message(
+        f"✅ Auto role enabled. New members will receive {role.mention}.",
+        ephemeral=True,
+    )
+
+
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_roles=True)
+@bot.tree.command(name="autorole-off", description="Turn off the automatic role for new members.")
+async def autorole_off_command(i: discord.Interaction):
+    if not i.guild:
+        await i.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
+        return
+
+    AUTO_ROLES[i.guild.id] = {"role_id": ""}
+    log_event("AUTOROLE", f"Auto role disabled in {i.guild.name} by {i.user}")
+    await i.response.send_message("✅ Auto role has been disabled.", ephemeral=True)
+
+
 async def on_member_join(member):
+    role_settings = auto_role_settings(member.guild.id)
+    if role_settings["role_id"]:
+        try:
+            role = member.guild.get_role(int(role_settings["role_id"]))
+            if role and role < member.guild.me.top_role and not role.is_default():
+                await member.add_roles(role, reason="Auto role on member join")
+                log_event("AUTOROLE", f"Assigned {role.name} to {member} in {member.guild.name}")
+            elif role:
+                log_event("ERROR", f"Cannot assign auto role {role.name} in {member.guild.name}: role is above or equal to the bot's highest role")
+        except Exception as e:
+            log_event("ERROR", f"Auto role failed for {member}: {e}")
+
     settings = WELCOME.get(member.guild.id)
     if not settings or not settings["enabled"] or not settings["channel_id"]:
         return
