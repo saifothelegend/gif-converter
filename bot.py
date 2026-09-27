@@ -15,7 +15,13 @@ LOCK = asyncio.Semaphore(1)
 
 GUILD_ID = 1551941310682767410
 WELCOME_DEFAULT = "👋 Welcome {mention} to **{server}**! You are member #{member_count}."
-WELCOME = {"enabled": False, "channel_id": "", "message": WELCOME_DEFAULT}
+WELCOME = {}
+
+def welcome_settings(guild_id):
+    return WELCOME.setdefault(
+        guild_id,
+        {"enabled": False, "channel_id": "", "message": WELCOME_DEFAULT},
+    )
 STATS = {"total": 0, "active": 0, "last": "Idle"}
 LOGS = []
 SESSIONS = set()
@@ -59,13 +65,12 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member):
-    if member.guild.id != GUILD_ID:
-        return
-    if not WELCOME["enabled"] or not WELCOME["channel_id"]:
+    settings = WELCOME.get(member.guild.id)
+    if not settings or not settings["enabled"] or not settings["channel_id"]:
         return
     try:
-        channel = await bot.fetch_channel(int(WELCOME["channel_id"]))
-        template = WELCOME["message"] or WELCOME_DEFAULT
+        channel = await bot.fetch_channel(int(settings["channel_id"]))
+        template = settings["message"] or WELCOME_DEFAULT
         text = (template.replace("{user}", str(member))
                 .replace("{username}", member.display_name)
                 .replace("{mention}", member.mention)
@@ -213,11 +218,11 @@ async def gif(i: discord.Interaction, file: discord.Attachment):
 @bot.tree.command(name="welcome", description="Set the welcome channel and enable the welcomer.")
 @app_commands.describe(channel="The channel where new-member welcome messages should be sent.")
 async def welcome_command(i: discord.Interaction, channel: discord.TextChannel):
-    if i.guild_id != GUILD_ID:
-        await i.response.send_message("❌ This command is only available in the configured server.", ephemeral=True)
+    if not i.guild:
+        await i.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
         return
 
-    permissions = channel.permissions_for(i.guild.me) if i.guild and i.guild.me else None
+    permissions = channel.permissions_for(i.guild.me) if i.guild.me else None
     if not permissions or not permissions.send_messages or not permissions.embed_links:
         await i.response.send_message(
             "❌ I need **Send Messages** and **Embed Links** permission in that channel.",
@@ -225,10 +230,11 @@ async def welcome_command(i: discord.Interaction, channel: discord.TextChannel):
         )
         return
 
-    WELCOME["enabled"] = True
-    WELCOME["channel_id"] = str(channel.id)
-    if not WELCOME["message"]:
-        WELCOME["message"] = WELCOME_DEFAULT
+    settings = welcome_settings(i.guild.id)
+    settings["enabled"] = True
+    settings["channel_id"] = str(channel.id)
+    if not settings["message"]:
+        settings["message"] = WELCOME_DEFAULT
 
     log_event("WELCOME", f"Welcomer enabled by {i.user} in {i.guild.name} / #{channel.name}")
     await i.response.send_message(
