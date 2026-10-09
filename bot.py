@@ -292,8 +292,8 @@ async def ai_gif_search_query(prompt):
                 log_event("ERROR", f"AI GIF query failed (HTTP {response.status}): {body}")
                 raise RuntimeError("AI couldn't understand that request. Please try again.")
             data = await response.json()
-    query = data["choices"][0]["message"]["content"].strip().strip('"')[:120]
-    return query or prompt[:120]
+    query = data["choices"][0]["message"]["content"].strip().strip('"')[:50]
+    return query or prompt[:50]
 
 
 async def giphy_gif_url(query):
@@ -329,7 +329,7 @@ async def send_ai_gif(target, prompt, reply_to=None):
     url = await giphy_gif_url(query)
     embed = discord.Embed(
         title="🎞️ AI-picked GIF",
-        description=f"Search: **{discord.utils.escape_markdown(query)}** · GIF via GIPHY",
+        description=f"Search: **{discord.utils.escape_markdown(query)}** · Powered by GIPHY",
         color=discord.Color.blurple(),
     )
     embed.set_image(url=url)
