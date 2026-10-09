@@ -431,11 +431,11 @@ async def welcome_command(i: discord.Interaction, channel: discord.TextChannel):
 @bot.tree.command(name="test", description="Send a test welcome message.")
 @app_commands.describe(channel="The channel where the test welcome should be sent.")
 async def test_command(i: discord.Interaction, channel: discord.TextChannel):
-    if i.guild_id != GUILD_ID:
-        await i.response.send_message("❌ This command is only available in the configured server.", ephemeral=True)
+    if not i.guild:
+        await i.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
         return
 
-    permissions = channel.permissions_for(i.guild.me) if i.guild and i.guild.me else None
+    permissions = channel.permissions_for(i.guild.me) if i.guild.me else None
     if not permissions or not permissions.send_messages or not permissions.embed_links:
         await i.response.send_message(
             "❌ I need **Send Messages** and **Embed Links** permission in that channel.",
@@ -444,7 +444,8 @@ async def test_command(i: discord.Interaction, channel: discord.TextChannel):
         return
 
     try:
-        template = WELCOME["message"] or WELCOME_DEFAULT
+        settings = welcome_settings(i.guild.id)
+        template = settings["message"] or WELCOME_DEFAULT
         text = (template.replace("{user}", str(i.user))
                 .replace("{username}", i.user.display_name)
                 .replace("{mention}", i.user.mention)
