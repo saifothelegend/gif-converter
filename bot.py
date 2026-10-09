@@ -262,12 +262,12 @@ async def do_convert(i, a):
 
 
 
-# AI GIF responder. Add OPENAI_API_KEY and TENOR_API_KEY in Render's Environment.
+# AI GIF responder. Add OPENAI_API_KEY and GIPHY_API_KEY in Render's Environment.
 GIF_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-TENOR_URL = "https://tenor.googleapis.com/v2/search"
+GIPHY_URL = "https://api.giphy.com/v1/gifs/search"
 
 async def ai_gif_search_query(prompt):
-    """Turn a user's request into a short, safe Tenor search query."""
+    """Turn a user's request into a short, safe GIPHY search query."""
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("AI is not configured yet. Add OPENAI_API_KEY in Render Environment.")
@@ -296,30 +296,29 @@ async def ai_gif_search_query(prompt):
     return query or prompt[:120]
 
 
-async def tenor_gif_url(query):
-    api_key = os.getenv("TENOR_API_KEY", "").strip()
+async def giphy_gif_url(query):
+    api_key = os.getenv("GIPHY_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("Tenor is not configured. Add TENOR_API_KEY in Render Environment.")
+        raise RuntimeError("GIPHY is not configured. Add GIPHY_API_KEY in Render Environment.")
     params = {
+        "api_key": api_key,
         "q": query,
-        "key": api_key,
-        "client_key": "gif_converter_discord_bot",
         "limit": "8",
-        "contentfilter": "high",
-        "locale": "en_US",
+        "rating": "pg",
+        "lang": "en",
     }
     timeout = aiohttp.ClientTimeout(total=20)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(TENOR_URL, params=params) as response:
+        async with session.get(GIPHY_URL, params=params) as response:
             if response.status != 200:
                 body = (await response.text())[:300]
-                log_event("ERROR", f"Tenor search failed (HTTP {response.status}): {body}")
-                raise RuntimeError("Tenor GIF search failed. Check the API key and try again.")
+                log_event("ERROR", f"GIPHY search failed (HTTP {response.status}): {body}")
+                raise RuntimeError("GIPHY GIF search failed. Check the API key and try again.")
             data = await response.json()
 
-    for result in data.get("results", []):
-        media = result.get("media_formats", {})
-        gif = media.get("gif") or media.get("mediumgif") or media.get("tinygif")
+    for result in data.get("data", []):
+        images = result.get("images", {})
+        gif = images.get("downsized_medium") or images.get("original") or images.get("fixed_height")
         if gif and gif.get("url"):
             return gif["url"]
     raise RuntimeError("I couldn't find a matching GIF. Try a different description.")
@@ -327,10 +326,10 @@ async def tenor_gif_url(query):
 
 async def send_ai_gif(target, prompt, reply_to=None):
     query = await ai_gif_search_query(prompt)
-    url = await tenor_gif_url(query)
+    url = await giphy_gif_url(query)
     embed = discord.Embed(
         title="🎞️ AI-picked GIF",
-        description=f"Search: **{discord.utils.escape_markdown(query)}** · GIF via Tenor",
+        description=f"Search: **{discord.utils.escape_markdown(query)}** · GIF via GIPHY",
         color=discord.Color.blurple(),
     )
     embed.set_image(url=url)
@@ -338,7 +337,7 @@ async def send_ai_gif(target, prompt, reply_to=None):
         await reply_to.reply(embed=embed, mention_author=False)
     else:
         await target.send(embed=embed)
-    log_event("AIGIF", f"Sent Tenor GIF for query '{query}' in {getattr(target, 'name', 'DM')}")
+    log_event("AIGIF", f"Sent GIPHY GIF for query '{query}' in {getattr(target, 'name', 'DM')}")
 
 
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
