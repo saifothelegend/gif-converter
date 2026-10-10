@@ -313,9 +313,21 @@ async def ai_gif_search_query(message_text):
             json=payload,
         ) as response:
             if response.status != 200:
-                body = (await response.text())[:300]
+                body = (await response.text())[:500]
                 log_event("ERROR", f"AI GIF query failed (HTTP {response.status}): {body}")
-                raise RuntimeError("AI couldn't choose a reaction. Please try again.")
+                if response.status == 401:
+                    message = "OpenAI rejected OPENAI_API_KEY. Check that the key in Render is correct and active."
+                elif response.status == 429:
+                    message = "OpenAI API limit or credits reached. Check your OpenAI API billing and usage limits."
+                elif response.status == 403:
+                    message = "OpenAI denied access. Check the API project/key permissions and supported access."
+                elif response.status == 404:
+                    message = f"OpenAI model '{GIF_MODEL}' was not found or is unavailable. Check OPENAI_MODEL in Render."
+                elif response.status >= 500:
+                    message = "OpenAI is temporarily having a server problem. Please try again shortly."
+                else:
+                    message = f"OpenAI request failed (HTTP {response.status}). Check the Render logs for details."
+                raise RuntimeError(message)
             data = await response.json()
     query = data["choices"][0]["message"]["content"].strip().strip('"')[:50]
     return query or "funny reaction"
