@@ -270,6 +270,14 @@ GIPHY_URL = "https://api.giphy.com/v1/gifs/search"
 # Use direct GIF/image URLs or Discord CDN links.
 MY_GIF_URLS = [
     # "https://media.example.com/my-reaction.gif",
+      "https://klipy.com/gifs/death-note-light-yagami-46",
+      "https://cdn.discordapp.com/attachments/1530807359171985471/1554103754284867614/converted.gif"
+      "https://cdn.discordapp.com/attachments/1530807359171985471/1551588374349881365/togif.gif"
+      "https://cdn.discordapp.com/attachments/1530807359171985471/1552899781528002651/converted.gif"
+      "https://cdn.discordapp.com/attachments/1413554626929889430/1553320985875320902/converted.gif"
+      "https://cdn.discordapp.com/attachments/1413554626929889430/1553320985875320902/converted.gif"
+      "https://cdn.discordapp.com/attachments/1532782229086933138/1555286089231638568/converted.gif?backend=b2"
+      "https://tenor.com/view/e-e-ei-i%27m-on-vacation-echo-you-are-going-to-be-the-death-of-me-my-little-sibling-is-obsessed-it%27s-okay-though-ily-gif-15149604940529451161"
 ]
 
 
