@@ -353,10 +353,18 @@ async def giphy_reaction_command(i: discord.Interaction, message: discord.Messag
 my_gif_context_menu = app_commands.ContextMenu(
     name="Pick My GIF",
     callback=my_gif_command,
+    allowed_contexts=app_commands.AppCommandContext(
+        guild=True, dm_channel=True, private_channel=True
+    ),
+    allowed_installs=app_commands.AppInstallationType(guild=True, user=True),
 )
 giphy_reaction_context_menu = app_commands.ContextMenu(
     name="Pick GIPHY GIF",
     callback=giphy_reaction_command,
+    allowed_contexts=app_commands.AppCommandContext(
+        guild=True, dm_channel=True, private_channel=True
+    ),
+    allowed_installs=app_commands.AppInstallationType(guild=True, user=True),
 )
 bot.tree.add_command(my_gif_context_menu)
 bot.tree.add_command(giphy_reaction_context_menu)
