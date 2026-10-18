@@ -225,7 +225,7 @@ async def convert(a, update):
         raise
 
 
-async def do_convert(i, a):
+async def do_convert(i, a, output_name="converted"):
     await i.response.defer()
     STATS["active"] += 1
     STATS["last"] = f"Converting {a.filename}"
@@ -243,9 +243,12 @@ async def do_convert(i, a):
                 shutil.copyfile(path, LATEST_GIF)
                 log_event("PREVIEW", f"Updated admin preview with {a.filename}")
                 await status(i, "📤 Uploading your GIF...")
+                import re
+                safe_name = re.sub(r"[^A-Za-z0-9 _-]", "", output_name).strip().replace(" ", "-")[:60]
+                safe_name = safe_name or "converted"
                 await i.followup.send(
                     "✅ Done!",
-                    file=discord.File(path, filename="converted.gif")
+                    file=discord.File(path, filename=f"{safe_name}.gif")
                 )
                 await status(i, "✅ Done!")
                 STATS["total"] += 1
@@ -264,98 +267,6 @@ async def do_convert(i, a):
 
 # GIF reactions: use your own collection or search GIPHY directly, with no OpenAI/ChatGPT API.
 GIPHY_URL = "https://api.giphy.com/v1/gifs/search"
-
-# Named GIF library. Stored in a JSON file; on Render, use a persistent disk
-# if you want saved entries to survive service restarts/redeploys.
-GIF_LIBRARY_FILE = Path("gif_library.json")
-
-
-def load_gif_library():
-    try:
-        with GIF_LIBRARY_FILE.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {str(name).casefold(): {"name": str(item["name"]), "url": str(item["url"])}
-                for name, item in data.items()
-                if isinstance(item, dict) and item.get("name") and item.get("url")}
-    except FileNotFoundError:
-        return {}
-    except Exception as e:
-        log_event("ERROR", f"Could not load named GIF library: {e}")
-        return {}
-
-
-def save_gif_library(library):
-    with GIF_LIBRARY_FILE.open("w", encoding="utf-8") as f:
-        json.dump(library, f, ensure_ascii=False, indent=2)
-
-
-NAMED_GIFS = load_gif_library()
-
-
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@app_commands.allowed_installs(guilds=True, users=True)
-@bot.tree.command(name="gif-add", description="Save a GIF under a searchable name (bot owner only).")
-@app_commands.describe(name="A short name for this GIF", url="A direct URL to the GIF image")
-async def gif_add_command(i: discord.Interaction, name: str, url: str):
-    if not await bot.is_owner(i.user):
-        await i.response.send_message("❌ Only the bot owner can add GIFs to the named collection.", ephemeral=True)
-        return
-    name = name.strip()
-    url = url.strip()
-    if not name or len(name) > 80:
-        await i.response.send_message("❌ The name must be between 1 and 80 characters.", ephemeral=True)
-        return
-    if not url.startswith(("https://", "http://")):
-        await i.response.send_message("❌ Please provide a valid HTTP or HTTPS GIF URL.", ephemeral=True)
-        return
-    key = name.casefold()
-    NAMED_GIFS[key] = {"name": name, "url": url}
-    try:
-        save_gif_library(NAMED_GIFS)
-    except Exception as e:
-        log_event("ERROR", f"Could not save named GIF '{name}': {e}")
-        await i.response.send_message("❌ I couldn't save the GIF library file. Check the hosting disk settings.", ephemeral=True)
-        return
-    log_event("GIFLIB", f"Saved named GIF '{name}' by {i.user}")
-    await i.response.send_message(f"✅ Saved **{discord.utils.escape_markdown(name)}**. Search for it with /gif-search.", ephemeral=True)
-
-
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@app_commands.allowed_installs(guilds=True, users=True)
-@bot.tree.command(name="gif-search", description="Find a saved GIF by name.")
-@app_commands.describe(name="Full or partial name to search for")
-async def gif_search_command(i: discord.Interaction, name: str):
-    query = name.strip().casefold()
-    if not query:
-        await i.response.send_message("Type a name to search for.", ephemeral=True)
-        return
-    matches = [item for key, item in NAMED_GIFS.items() if query in key]
-    if not matches:
-        await i.response.send_message(f"🔎 No saved GIF matched **{discord.utils.escape_markdown(name)}**.", ephemeral=True)
-        return
-    if len(matches) > 1:
-        names = "\n".join(f"• **{discord.utils.escape_markdown(item['name'])}**" for item in matches[:15])
-        await i.response.send_message(f"🔎 I found {len(matches)} matching GIF(s):\n{names}\nRun /gif-search with a more specific name to get one.", ephemeral=True)
-        return
-    item = matches[0]
-    embed = discord.Embed(title=f"🎞️ {item['name']}", color=discord.Color.blurple())
-    embed.set_image(url=item["url"])
-    await i.response.send_message(embed=embed)
-    log_event("GIFLIB", f"GIF '{item['name']}' searched by {i.user}")
-
-
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@app_commands.allowed_installs(guilds=True, users=True)
-@bot.tree.command(name="gif-list", description="List names in your saved GIF collection.")
-async def gif_list_command(i: discord.Interaction):
-    if not NAMED_GIFS:
-        await i.response.send_message("Your named GIF collection is empty. Use /gif-add to save one.", ephemeral=True)
-        return
-    names = sorted(item["name"] for item in NAMED_GIFS.values())
-    shown = names[:40]
-    listing = "\n".join(f"• {discord.utils.escape_markdown(name)}" for name in shown)
-    suffix = f"\n…and {len(names) - len(shown)} more." if len(names) > len(shown) else ""
-    await i.response.send_message(f"**Saved GIFs ({len(names)}):**\n{listing}{suffix}", ephemeral=True)
 
 # Add direct GIF/image URLs or Discord CDN links to your approved collection.
 MY_GIF_URLS = [
@@ -465,9 +376,12 @@ bot.tree.add_command(giphy_reaction_context_menu)
 @bot.tree.command(name="gif", description="Convert an image or video to a GIF.")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.describe(file="Image or video to convert.")
-async def gif(i: discord.Interaction, file: discord.Attachment):
-    await do_convert(i, file)
+@app_commands.describe(
+    file="Image or video to convert.",
+    name="What to name the resulting GIF (without .gif).",
+)
+async def gif(i: discord.Interaction, file: discord.Attachment, name: str = "converted"):
+    await do_convert(i, file, name)
 
 
 @app_commands.guild_only()
