@@ -406,10 +406,10 @@ async def gif(i: discord.Interaction, file: discord.Attachment, name: str = "con
     await do_convert(i, file, name)
 
 
+@bot.tree.command(name="caption", description="Add a TikTok-style caption bar to an image or video.")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.describe(file="Image or video to caption.", text="Text to display in the top white bar.", name="Output GIF filename.")
-@bot.tree.command(name="caption", description="Add a TikTok-style caption bar to an image or video.")
 async def caption_command(i: discord.Interaction, file: discord.Attachment, text: str, name: str = "caption"):
     if not text.strip():
         await i.response.send_message("Please enter caption text.", ephemeral=True)
@@ -417,10 +417,10 @@ async def caption_command(i: discord.Interaction, file: discord.Attachment, text
     await do_convert(i, file, name, text.strip(), "tiktok")
 
 
+@bot.tree.command(name="snap-caption", description="Add a Snapchat-style custom caption bar.")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.describe(file="Image or video to caption.", text="Text to display in the gray Snapchat-style bar.", name="Output GIF filename.")
-@bot.tree.command(name="snap-caption", description="Add a Snapchat-style custom caption bar.")
 async def snap_caption_command(i: discord.Interaction, file: discord.Attachment, text: str, name: str = "snap-caption"):
     if not text.strip():
         await i.response.send_message("Please enter caption text.", ephemeral=True)
