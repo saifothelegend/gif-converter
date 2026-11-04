@@ -10,7 +10,8 @@ from discord.ext import commands
 MAX = 9 * 1024 * 1024
 TIMEOUT = 180
 VIDEO = {".mp4",".mov",".webm",".mkv",".avi",".m4v"}
-IMAGE = {".jpg",".jpeg",".png",".webp",".bmp",".gif"}
+IMAGE = {".jpg",".jpeg",".png",".webp",".bmp"}
+ANIMATED = {".gif"}
 LOCK = asyncio.Semaphore(1)
 
 GUILD_ID = 1551941310682767410
@@ -167,17 +168,21 @@ async def ffmpeg(src, dst, width, fps, seconds, image=False, caption_file=None, 
         font = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
         text_path = caption_file.replace(chr(92), chr(92) * 2).replace(":", chr(92) + ":")
         if caption_style == "tiktok":
-            bar = "drawbox=x=0:y=0:w=iw:h=ih*0.15:color=white:t=fill"
-            text_y = "(h*0.15-text_h)/2"
+            # Clean TikTok-inspired header strip.
+            bar = "drawbox=x=0:y=0:w=iw:h=ih*0.16:color=white:t=fill"
+            text_y = "(h*0.16-text_h)/2"
             text_color = "black"
+            font_size = "h/20"
         else:
-            bar = "drawbox=x=0:y=ih*0.165:w=iw:h=ih*0.058:color=0x777777:t=fill"
-            text_y = "h*0.165+(h*0.058-text_h)/2"
+            # Match the supplied Snapchat reference: narrow gray band near the top.
+            bar = "drawbox=x=0:y=ih*0.167:w=iw:h=ih*0.058:color=0x777777:t=fill"
+            text_y = "h*0.167+(h*0.058-text_h)/2"
             text_color = "white"
+            font_size = "h/22"
         caption_filter = (
             f"{bar},drawtext=fontfile={font}:textfile={text_path}:"
-            f"fontcolor={text_color}:fontsize=h/22:x=(w-text_w)/2:y={text_y}:"
-            "fix_bounds=1"
+            f"fontcolor={text_color}:fontsize={font_size}:"
+            f"x=max(8,(w-text_w)/2):y={text_y}:fix_bounds=1"
         )
         prep = f"{prep},{caption_filter}"
     filt = f"{prep},split[a][b];[a]palettegen=max_colors=256:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5[out]"
@@ -224,9 +229,11 @@ async def convert(a, update, caption_text=None, caption_style=None):
         await update("📥 Downloading your file...")
         await download(a.url, src)
 
+        is_still_image = ext in IMAGE
+        # GIFs are animations, not still images: keep all frames and process like video.
         settings = (
             [(1200,1,1),(1024,1,1),(896,1,1),(768,1,1),(640,1,1)]
-            if ext in IMAGE
+            if is_still_image
             else [(480,10,6),(400,8,6),(320,8,6)]
         )
 
@@ -237,7 +244,7 @@ async def convert(a, update, caption_text=None, caption_style=None):
                 await update(f"⚙️ Converting to GIF — {w}px at {fps} FPS...")
             if os.path.exists(dst):
                 os.remove(dst)
-            await ffmpeg(src, dst, w, fps, sec, ext in IMAGE, caption_file, caption_style)
+            await ffmpeg(src, dst, w, fps, sec, is_still_image, caption_file, caption_style)
             if os.path.getsize(dst) <= MAX:
                 return dst, d
 
