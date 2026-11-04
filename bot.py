@@ -214,7 +214,7 @@ async def convert(a, update, caption_text=None, caption_style=None):
         raise RuntimeError("Please use an image or video.")
 
     d = tempfile.mkdtemp(prefix="gif_")
-    src, dst = os.path.join(d, a.filename), os.path.join(d, "converted.gif")
+    src, dst = os.path.join(d, "input" + ext), os.path.join(d, "result.gif")
     caption_file = None
     try:
         if caption_text is not None:
