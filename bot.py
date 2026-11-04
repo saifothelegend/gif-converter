@@ -168,7 +168,8 @@ async def ffmpeg(src, dst, width, fps, seconds, image=False, caption_file=None, 
         font = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
         text_path = caption_file.replace(chr(92), chr(92) * 2).replace(":", chr(92) + ":")
         if caption_style == "tiktok":
-            # Clean TikTok-inspired header strip.
+            # Clean TikTok-inspired header strip with a bold, readable title.
+            font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
             bar = "drawbox=x=0:y=0:w=iw:h=ih*0.16:color=white:t=fill"
             text_y = "(h*0.16-text_h)/2"
             text_color = "black"
