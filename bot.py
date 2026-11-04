@@ -159,10 +159,27 @@ async def download(url, path):
                 f.write(chunk)
 
 
-async def ffmpeg(src, dst, width, fps, seconds, image=False):
+async def ffmpeg(src, dst, width, fps, seconds, image=False, caption_file=None, caption_style=None):
     prep = f"scale=w='min({width},iw)':h=-2:flags=lanczos"
     if not image:
         prep = f"fps={fps}," + prep
+    if caption_file and caption_style:
+        font = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        text_path = caption_file.replace(chr(92), chr(92) * 2).replace(":", chr(92) + ":")
+        if caption_style == "tiktok":
+            bar = "drawbox=x=0:y=0:w=iw:h=ih*0.15:color=white:t=fill"
+            text_y = "(ih*0.15-text_h)/2"
+            text_color = "black"
+        else:
+            bar = "drawbox=x=0:y=ih*0.165:w=iw:h=ih*0.058:color=0x777777:t=fill"
+            text_y = "ih*0.165+(ih*0.058-text_h)/2"
+            text_color = "white"
+        caption_filter = (
+            f"{bar},drawtext=fontfile={font}:textfile={text_path}:"
+            f"fontcolor={text_color}:fontsize=h/22:x=(w-text_w)/2:y={text_y}:"
+            "fix_bounds=1"
+        )
+        prep = f"{prep},{caption_filter}"
     filt = f"{prep},split[a][b];[a]palettegen=max_colors=256:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5[out]"
     cmd = [
         "ffmpeg","-y","-threads","1","-filter_threads","1",
@@ -191,14 +208,19 @@ async def ffmpeg(src, dst, width, fps, seconds, image=False):
         raise RuntimeError("FFmpeg did not create the GIF.")
 
 
-async def convert(a, update):
+async def convert(a, update, caption_text=None, caption_style=None):
     ext = Path(a.filename).suffix.lower()
     if ext not in VIDEO and ext not in IMAGE:
         raise RuntimeError("Please use an image or video.")
 
     d = tempfile.mkdtemp(prefix="gif_")
     src, dst = os.path.join(d, a.filename), os.path.join(d, "converted.gif")
+    caption_file = None
     try:
+        if caption_text is not None:
+            caption_file = os.path.join(d, "caption.txt")
+            with open(caption_file, "w", encoding="utf-8") as f:
+                f.write(caption_text.replace(chr(13), " ").replace(chr(10), " ")[:160])
         await update("📥 Downloading your file...")
         await download(a.url, src)
 
@@ -215,7 +237,7 @@ async def convert(a, update):
                 await update(f"⚙️ Converting to GIF — {w}px at {fps} FPS...")
             if os.path.exists(dst):
                 os.remove(dst)
-            await ffmpeg(src, dst, w, fps, sec, ext in IMAGE)
+            await ffmpeg(src, dst, w, fps, sec, ext in IMAGE, caption_file, caption_style)
             if os.path.getsize(dst) <= MAX:
                 return dst, d
 
@@ -225,7 +247,7 @@ async def convert(a, update):
         raise
 
 
-async def do_convert(i, a, output_name="converted"):
+async def do_convert(i, a, output_name="converted", caption_text=None, caption_style=None):
     await i.response.defer()
     STATS["active"] += 1
     STATS["last"] = f"Converting {a.filename}"
@@ -237,7 +259,7 @@ async def do_convert(i, a, output_name="converted"):
     async with LOCK:
         await status(i, "📥 Starting GIF conversion...")
         try:
-            path, d = await convert(a, lambda x: status(i, x))
+            path, d = await convert(a, lambda x: status(i, x), caption_text, caption_style)
             try:
                 # Keep only the most recent GIF for the admin preview.
                 shutil.copyfile(path, LATEST_GIF)
@@ -382,6 +404,28 @@ bot.tree.add_command(giphy_reaction_context_menu)
 )
 async def gif(i: discord.Interaction, file: discord.Attachment, name: str = "converted"):
     await do_convert(i, file, name)
+
+
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.describe(file="Image or video to caption.", text="Text to display in the top white bar.", name="Output GIF filename.")
+@bot.tree.command(name="caption", description="Add a TikTok-style caption bar to an image or video.")
+async def caption_command(i: discord.Interaction, file: discord.Attachment, text: str, name: str = "caption"):
+    if not text.strip():
+        await i.response.send_message("Please enter caption text.", ephemeral=True)
+        return
+    await do_convert(i, file, name, text.strip(), "tiktok")
+
+
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.describe(file="Image or video to caption.", text="Text to display in the gray Snapchat-style bar.", name="Output GIF filename.")
+@bot.tree.command(name="snap-caption", description="Add a Snapchat-style custom caption bar.")
+async def snap_caption_command(i: discord.Interaction, file: discord.Attachment, text: str, name: str = "snap-caption"):
+    if not text.strip():
+        await i.response.send_message("Please enter caption text.", ephemeral=True)
+        return
+    await do_convert(i, file, name, text.strip(), "snap")
 
 
 @app_commands.guild_only()
