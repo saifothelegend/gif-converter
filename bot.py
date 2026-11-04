@@ -168,11 +168,11 @@ async def ffmpeg(src, dst, width, fps, seconds, image=False, caption_file=None, 
         text_path = caption_file.replace(chr(92), chr(92) * 2).replace(":", chr(92) + ":")
         if caption_style == "tiktok":
             bar = "drawbox=x=0:y=0:w=iw:h=ih*0.15:color=white:t=fill"
-            text_y = "(ih*0.15-text_h)/2"
+            text_y = "(h*0.15-text_h)/2"
             text_color = "black"
         else:
             bar = "drawbox=x=0:y=ih*0.165:w=iw:h=ih*0.058:color=0x777777:t=fill"
-            text_y = "ih*0.165+(ih*0.058-text_h)/2"
+            text_y = "h*0.165+(h*0.058-text_h)/2"
             text_color = "white"
         caption_filter = (
             f"{bar},drawtext=fontfile={font}:textfile={text_path}:"
